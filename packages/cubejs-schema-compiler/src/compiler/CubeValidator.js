@@ -16,7 +16,7 @@ const regexTimeInterval = Joi.string().custom((value, helper) => {
   if (value.match(/^(-?\d+) (minute|hour|day|week|month|quarter|year)$/)) {
     return value;
   } else {
-    return helper.message({ custom: `(${helper.state.path.join('.')} = ${value}) does not match regexp: /^(-?\\d+) (minute|hour|day|week|month|year)$/` });
+    return helper.message({ custom: `(${helper.state.path.join('.')} = ${value}) does not match regexp: /^(-?\\d+) (minute|hour|day|week|month|quarter|year)$/` });
   }
 });
 
