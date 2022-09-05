@@ -1,6 +1,6 @@
 import './index.less';
 
-export * from './cloud';
+export * from '../components/cloud';
 export * from './components/QueryBuilder';
 export * from '../components/RollupDesigner/Context';
 export * from '../hooks';

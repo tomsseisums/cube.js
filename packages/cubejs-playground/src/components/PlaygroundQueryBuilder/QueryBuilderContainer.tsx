@@ -7,7 +7,7 @@ import styled from 'styled-components';
 
 import { Button, CubeLoader } from '../../atoms';
 import { useAppContext, useCubejsApi, useSecurityContext } from '../../hooks';
-import { useCloud } from '../../playground';
+import { useCloud } from '../cloud';
 import { ChartRendererStateProvider } from '../QueryTabs/ChartRendererStateProvider';
 import { QueryTabs, QueryTabsProps } from '../QueryTabs/QueryTabs';
 import {

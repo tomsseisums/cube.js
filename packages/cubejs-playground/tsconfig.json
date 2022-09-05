@@ -25,7 +25,7 @@
     "isolatedModules": true,
     "noImplicitAny": false,
     "incremental": true,
-    "target": "es5",
+    "target": "ES2018",
     "noEmit": true,
   },
   "include": [

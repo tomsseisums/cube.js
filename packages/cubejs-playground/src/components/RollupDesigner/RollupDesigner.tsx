@@ -19,7 +19,7 @@ import { CodeSnippet, FatalError } from '../../atoms';
 import { Box, Flex } from '../../grid';
 import { useDeepEffect, useIsMounted, useToken } from '../../hooks';
 import { useDeepMemo } from '../../hooks/deep-memo';
-import { useCloud } from '../../playground/cloud';
+import { useCloud } from '../cloud';
 import { getNameMemberPairs, request } from '../../shared/helpers';
 import { QueryMemberKey } from '../../types';
 import { prettifyObject } from '../../utils';

@@ -244,7 +244,7 @@ export function ConnectionWizardPage({ history }) {
               ) : (
                 <Typography.Paragraph>
                   Enter database credentials to connect to your database. <br />
-                  Cube.js will store your credentials into the <code>
+                  Cube will store your credentials into the <code>
                     .env
                   </code>{' '}
                   file for future use.
