@@ -40,7 +40,7 @@
     "@cubejs-backend/linter": "^0.30.0",
     "@cubejs-backend/testing-shared": "^0.30.67",
     "testcontainers": "^8.4.0",
-    "typescript": "~4.1.5"
+    "typescript": "~4.3.3"
   },
   "publishConfig": {
     "access": "public"
