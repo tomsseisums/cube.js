@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import { flatbuffers } from 'flatbuffers';
+import * as flatbuffers from 'flatbuffers';
 import { InlineTable } from '@cubejs-backend/base-driver';
 import {
   HttpCommand,
@@ -8,7 +8,7 @@ import {
   HttpQuery,
   HttpResultSet,
   HttpTable
-} from '../codegen/HttpMessage';
+} from './proto';
 
 export class WebSocketConnection {
   protected messageCounter: number;
