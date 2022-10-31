@@ -1,6 +1,10 @@
-const R = require('ramda');
-const { BaseQueueDriver } = require('./BaseQueueDriver');
+import R from 'ramda';
+import { QueueDriverInterface, LocalQueueDriverConnectionInterface } from '@cubejs-backend/base-driver';
+import { BaseQueueDriver } from './BaseQueueDriver';
 
+/**
+ * @implements {LocalQueueDriverConnectionInterface}
+ */
 export class LocalQueueDriverConnection {
   constructor(driver, options) {
     this.redisQueuePrefix = options.redisQueuePrefix;
@@ -18,6 +22,15 @@ export class LocalQueueDriverConnection {
     this.processingCounter = driver.processingCounter;
     this.processingLocks = driver.processingLocks;
     this.getQueueEventsBus = options.getQueueEventsBus;
+  }
+
+  async getQueriesToCancel() {
+    const [stalled, orphaned] = await Promise.all([
+      await this.getStalledQueries(),
+      await this.getOrphanedQueries(),
+    ]);
+
+    return stalled.concat(orphaned);
   }
 
   getResultPromise(resultListKey) {
@@ -268,6 +281,9 @@ const heartBeat = {};
 const processingCounters = {};
 const processingLocks = {};
 
+/**
+ * @implements {QueueDriverInterface}
+ */
 export class LocalQueueDriver extends BaseQueueDriver {
   constructor(options) {
     super();
