@@ -45,7 +45,7 @@ use crate::metastore::multi_index::MultiIndex;
 use crate::metastore::source::SourceCredentials;
 use crate::metastore::{
     is_valid_plain_binary_hll, table::Table, CacheItem, HllFlavour, IdRow, ImportFormat, Index,
-    IndexDef, IndexType, MetaStoreTable, RowKey, Schema, TableId,
+    IndexDef, IndexType, MetaStoreTable, QueueItem, RowKey, Schema, TableId,
 };
 use crate::queryplanner::panic::PanicWorkerNode;
 use crate::queryplanner::pretty_printers::{pp_phys_plan, pp_plan};
@@ -1092,6 +1092,16 @@ impl SqlService for SqlServiceImpl {
                     )))
                 }
             }
+            CubeStoreStatement::CacheIncr { key } => {
+                let row = self.db.cache_incr(key.value).await?;
+
+                Ok(Arc::new(DataFrame::new(
+                    vec![Column::new("value".to_string(), ColumnType::String, 0)],
+                    vec![Row::new(vec![TableValue::String(
+                        row.get_row().get_value().clone(),
+                    )])],
+                )))
+            }
             CubeStoreStatement::CacheKeys { prefix } => {
                 let rows = self.db.cache_keys(prefix.value).await?;
                 Ok(Arc::new(DataFrame::new(
@@ -1110,6 +1120,136 @@ impl SqlService for SqlServiceImpl {
                 self.db.cache_truncate().await?;
 
                 Ok(Arc::new(DataFrame::new(vec![], vec![])))
+            }
+            CubeStoreStatement::QueueAdd {
+                key,
+                priority,
+                value,
+            } => {
+                self.db
+                    .queue_add(QueueItem::new(
+                        key.value,
+                        value,
+                        QueueItem::status_default(),
+                        priority,
+                    ))
+                    .await?;
+
+                Ok(Arc::new(DataFrame::new(vec![], vec![])))
+            }
+            CubeStoreStatement::QueueTruncate {} => {
+                self.db.queue_truncate().await?;
+
+                Ok(Arc::new(DataFrame::new(vec![], vec![])))
+            }
+            CubeStoreStatement::QueueCancel { key } => {
+                let row = self.db.queue_cancel(key.value).await?;
+                if let Some(row) = row {
+                    Ok(Arc::new(DataFrame::new(
+                        vec![Column::new("value".to_string(), ColumnType::String, 0)],
+                        vec![Row::new(vec![TableValue::String(
+                            row.get_row().get_value().clone(),
+                        )])],
+                    )))
+                } else {
+                    Ok(Arc::new(DataFrame::new(vec![], vec![])))
+                }
+            }
+            CubeStoreStatement::QueueHeartbeat { key } => {
+                self.db.queue_heartbeat(key.value).await?;
+
+                Ok(Arc::new(DataFrame::new(vec![], vec![])))
+            }
+            CubeStoreStatement::QueueMergeExtra { key, payload } => {
+                self.db.queue_merge_extra(key.value, payload).await?;
+
+                Ok(Arc::new(DataFrame::new(vec![], vec![])))
+            }
+            CubeStoreStatement::QueueAck { key, result } => {
+                self.db.queue_ack(key.value, result).await?;
+
+                Ok(Arc::new(DataFrame::new(vec![], vec![])))
+            }
+            CubeStoreStatement::QueueGet { key } => {
+                let row = self.db.queue_get(key.value).await?;
+                if let Some(row) = row {
+                    Ok(Arc::new(DataFrame::new(
+                        vec![
+                            Column::new("value".to_string(), ColumnType::String, 0),
+                            Column::new("extra".to_string(), ColumnType::String, 1),
+                        ],
+                        vec![Row::new(vec![
+                            TableValue::String(row.get_row().get_value().clone()),
+                            if let Some(extra) = row.get_row().get_extra() {
+                                TableValue::String(extra.clone())
+                            } else {
+                                TableValue::Null
+                            },
+                        ])],
+                    )))
+                } else {
+                    Ok(Arc::new(DataFrame::new(vec![], vec![])))
+                }
+            }
+            CubeStoreStatement::QueueList {
+                prefix,
+                with_payload,
+            } => {
+                let rows = self.db.queue_list(prefix.value).await?;
+
+                let mut columns = vec![
+                    Column::new("id".to_string(), ColumnType::String, 0),
+                    Column::new("status".to_string(), ColumnType::String, 1),
+                ];
+
+                if with_payload {
+                    columns.push(Column::new("payload".to_string(), ColumnType::String, 2));
+                }
+
+                Ok(Arc::new(DataFrame::new(
+                    columns,
+                    rows.into_iter()
+                        .map(|item| {
+                            let mut res = vec![
+                                TableValue::String(item.get_row().get_key().clone()),
+                                TableValue::String(item.get_row().get_status().to_string()),
+                            ];
+
+                            if with_payload {
+                                res.push(TableValue::String(item.get_row().get_value().clone()));
+                            }
+
+                            Row::new(res)
+                        })
+                        .collect(),
+                )))
+            }
+            CubeStoreStatement::QueueRetrieve {
+                key,
+                concurrency: _,
+            } => {
+                let row = self.db.queue_retrieve(key.value).await?;
+                if let Some(row) = row {
+                    Ok(Arc::new(DataFrame::new(
+                        vec![Column::new("value".to_string(), ColumnType::String, 0)],
+                        vec![Row::new(vec![TableValue::String(
+                            row.get_row().get_value().clone(),
+                        )])],
+                    )))
+                } else {
+                    Ok(Arc::new(DataFrame::new(vec![], vec![])))
+                }
+            }
+            CubeStoreStatement::QueueResult { timeout, key } => {
+                let ack_result = self.db.queue_result(key.value, timeout).await?;
+                if let Some(ack_result) = ack_result {
+                    Ok(Arc::new(DataFrame::new(
+                        vec![Column::new("value".to_string(), ColumnType::String, 0)],
+                        vec![Row::new(vec![TableValue::String(ack_result.result)])],
+                    )))
+                } else {
+                    Ok(Arc::new(DataFrame::new(vec![], vec![])))
+                }
             }
             CubeStoreStatement::Statement(Statement::Query(q)) => {
                 let logical_plan = self
@@ -3063,7 +3203,7 @@ mod tests {
                 ).await.unwrap();
 
             let result = service.exec_query(
-                "EXPLAIN SELECT platform, sum(amount) from foo.orders where age > 15 group by platform" 
+                "EXPLAIN SELECT platform, sum(amount) from foo.orders where age > 15 group by platform"
             ).await.unwrap();
             assert_eq!(result.len(), 1);
             assert_eq!(result.get_columns().len(), 1);
@@ -3115,7 +3255,7 @@ mod tests {
                     ).await.unwrap();
 
                 let result = service.exec_query(
-                    "EXPLAIN ANALYZE SELECT platform, sum(amount) from foo.orders where age > 15 group by platform" 
+                    "EXPLAIN ANALYZE SELECT platform, sum(amount) from foo.orders where age > 15 group by platform"
                     ).await.unwrap();
 
                 assert_eq!(result.len(), 2);

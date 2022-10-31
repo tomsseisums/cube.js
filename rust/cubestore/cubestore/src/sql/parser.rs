@@ -64,6 +64,9 @@ pub enum Statement {
     CacheGet {
         key: Ident,
     },
+    CacheIncr {
+        key: Ident,
+    },
     CacheKeys {
         prefix: Ident,
     },
@@ -71,6 +74,41 @@ pub enum Statement {
         key: Ident,
     },
     CacheTruncate {},
+    QueueAdd {
+        priority: i64,
+        key: Ident,
+        value: String,
+    },
+    QueueGet {
+        key: Ident,
+    },
+    QueueList {
+        prefix: Ident,
+        with_payload: bool,
+    },
+    QueueCancel {
+        key: Ident,
+    },
+    QueueHeartbeat {
+        key: Ident,
+    },
+    QueueAck {
+        key: Ident,
+        result: String,
+    },
+    QueueMergeExtra {
+        key: Ident,
+        payload: String,
+    },
+    QueueRetrieve {
+        key: Ident,
+        concurrency: u32,
+    },
+    QueueResult {
+        timeout: u64,
+        key: Ident,
+    },
+    QueueTruncate {},
     System(SystemCommand),
     Dump(Box<Query>),
 }
@@ -103,6 +141,10 @@ impl<'a> CubeStoreParser<'a> {
                 _ if w.value.eq_ignore_ascii_case("sys") => {
                     self.parser.next_token();
                     self.parse_system()
+                }
+                _ if w.value.eq_ignore_ascii_case("queue") => {
+                    self.parser.next_token();
+                    self.parse_queue()
                 }
                 Keyword::CACHE => {
                     self.parser.next_token();
@@ -191,6 +233,9 @@ impl<'a> CubeStoreParser<'a> {
             "get" => Ok(Statement::CacheGet {
                 key: self.parser.parse_identifier()?,
             }),
+            "incr" => Ok(Statement::CacheIncr {
+                key: self.parser.parse_identifier()?,
+            }),
             "keys" => Ok(Statement::CacheKeys {
                 prefix: self.parser.parse_identifier()?,
             }),
@@ -200,6 +245,134 @@ impl<'a> CubeStoreParser<'a> {
             "truncate" => Ok(Statement::CacheTruncate {}),
             command => Err(ParserError::ParserError(format!(
                 "Unknown cache command: {}",
+                command
+            ))),
+        }
+    }
+
+    fn parse_queue(&mut self) -> Result<Statement, ParserError> {
+        let command = match self.parser.next_token() {
+            Token::Word(w) => w.value.to_ascii_lowercase(),
+            _ => {
+                return Err(ParserError::ParserError(
+                    "Unknown queue command, available: ADD|TRUNCATE".to_string(),
+                ))
+            }
+        };
+
+        match command.as_str() {
+            "add" => {
+                let priority = if self.parse_custom_token(&"priority") {
+                    match self.parser.parse_number_value()? {
+                        Value::Number(priority, _) => {
+                            let r = priority.parse::<i64>().map_err(|err| {
+                                ParserError::ParserError(format!(
+                                    "priority must be a positive integer, error: {}",
+                                    err
+                                ))
+                            })?;
+
+                            r
+                        }
+                        x => {
+                            return Err(ParserError::ParserError(format!(
+                                "priority must be a positive integer, actual: {:?}",
+                                x
+                            )))
+                        }
+                    }
+                } else {
+                    0
+                };
+
+                Ok(Statement::QueueAdd {
+                    priority,
+                    key: self.parser.parse_identifier()?,
+                    value: self.parser.parse_literal_string()?,
+                })
+            }
+            "cancel" => Ok(Statement::QueueCancel {
+                key: self.parser.parse_identifier()?,
+            }),
+            "heartbeat" => Ok(Statement::QueueHeartbeat {
+                key: self.parser.parse_identifier()?,
+            }),
+            "ack" => Ok(Statement::QueueAck {
+                key: self.parser.parse_identifier()?,
+                result: self.parser.parse_literal_string()?,
+            }),
+            "merge_extra" => Ok(Statement::QueueMergeExtra {
+                key: self.parser.parse_identifier()?,
+                payload: self.parser.parse_literal_string()?,
+            }),
+            "get" => Ok(Statement::QueueGet {
+                key: self.parser.parse_identifier()?,
+            }),
+            "list" => {
+                let with_payload = self.parse_custom_token(&"with_payload");
+
+                Ok(Statement::QueueList {
+                    prefix: self.parser.parse_identifier()?,
+                    with_payload,
+                })
+            }
+            "retrieve" => {
+                let concurrency = if self.parse_custom_token(&"concurrency") {
+                    match self.parser.parse_number_value()? {
+                        Value::Number(concurrency, false) => {
+                            let r = concurrency.parse::<u32>().map_err(|err| {
+                                ParserError::ParserError(format!(
+                                    "CONCURRENCY must be a positive integer, error: {}",
+                                    err
+                                ))
+                            })?;
+
+                            r
+                        }
+                        x => {
+                            return Err(ParserError::ParserError(format!(
+                                "CONCURRENCY must be a positive integer, actual: {:?}",
+                                x
+                            )))
+                        }
+                    }
+                } else {
+                    1
+                };
+
+                Ok(Statement::QueueRetrieve {
+                    key: self.parser.parse_identifier()?,
+                    concurrency,
+                })
+            }
+            "result_blocking" => {
+                let timeout = match self.parser.parse_number_value()? {
+                    Value::Number(concurrency, false) => {
+                        let r = concurrency.parse::<u64>().map_err(|err| {
+                            ParserError::ParserError(format!(
+                                "TIMEOUT must be a positive integer, error: {}",
+                                err
+                            ))
+                        })?;
+
+                        r
+                    }
+                    x => {
+                        return Err(ParserError::ParserError(format!(
+                            "TIMEOUT must be a positive integer, actual: {:?}",
+                            x
+                        )))
+                    }
+                };
+
+                Ok(Statement::QueueResult {
+                    timeout,
+                    key: self.parser.parse_identifier()?,
+                })
+            }
+            "truncate" => Ok(Statement::QueueTruncate {}),
+            command => Err(ParserError::ParserError(format!(
+                "Unknown queue command: {}",
                 command
             ))),
         }

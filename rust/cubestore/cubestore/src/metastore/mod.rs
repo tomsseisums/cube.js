@@ -7,6 +7,7 @@ pub mod listener;
 pub mod metastore_fs;
 pub mod multi_index;
 pub mod partition;
+pub mod queue;
 pub mod schema;
 pub mod source;
 pub mod table;
@@ -83,9 +84,10 @@ use std::time::{Duration, SystemTime};
 use table::Table;
 use table::{TableRocksIndex, TableRocksTable};
 use tokio::fs::File;
-use tokio::sync::broadcast::Sender;
+use tokio::sync::broadcast::{Receiver, Sender};
 
 use crate::metastore::compaction::{CompactionPreloadedState, CompactionSharedState};
+use crate::metastore::queue::{QueueItemIndexKey, QueueItemRocksIndex, QueueItemRocksTable};
 use wal::WALRocksTable;
 
 #[macro_export]
@@ -267,6 +269,12 @@ impl DataFrameValue<String> for u64 {
     }
 }
 
+impl DataFrameValue<String> for i64 {
+    fn value(v: &Self) -> String {
+        format!("{}", v)
+    }
+}
+
 impl DataFrameValue<String> for bool {
     fn value(v: &Self) -> String {
         format!("{}", v)
@@ -295,6 +303,12 @@ impl DataFrameValue<String> for Option<Vec<String>> {
     }
 }
 
+impl DataFrameValue<String> for DateTime<Utc> {
+    fn value(v: &Self) -> String {
+        v.to_string()
+    }
+}
+
 impl DataFrameValue<String> for Option<DateTime<Utc>> {
     fn value(v: &Self) -> String {
         v.as_ref()
@@ -312,6 +326,12 @@ impl DataFrameValue<String> for Option<ImportFormat> {
 }
 
 impl DataFrameValue<String> for IndexType {
+    fn value(v: &Self) -> String {
+        format!("{:?}", v)
+    }
+}
+
+impl DataFrameValue<String> for QueueItemStatus {
     fn value(v: &Self) -> String {
         format!("{:?}", v)
     }
@@ -748,6 +768,41 @@ pub struct CacheItem {
 }
 }
 
+#[repr(u8)]
+#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Hash)]
+pub enum QueueItemStatus {
+    Pending = 0,
+    Active = 1,
+    Finished = 2,
+}
+
+impl ToString for QueueItemStatus {
+    fn to_string(&self) -> String {
+        match self {
+            QueueItemStatus::Pending => "pending".to_string(),
+            QueueItemStatus::Active => "active".to_string(),
+            QueueItemStatus::Finished => "finished".to_string(),
+        }
+    }
+}
+
+data_frame_from! {
+#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq)]
+pub struct QueueItem {
+    prefix: Option<String>,
+    key: String,
+    // Immutable field
+    value: String,
+    extra: Option<String>,
+    #[serde(default = "QueueItem::status_default")]
+    status: QueueItemStatus,
+    #[serde(default)]
+    priority: i64,
+    created: DateTime<Utc>,
+    heartbeat: Option<DateTime<Utc>>
+}
+}
+
 data_frame_from! {
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Hash)]
 pub struct Chunk {
@@ -909,6 +964,7 @@ meta_store_table_impl!(IndexMetaStoreTable, Index, IndexRocksTable);
 meta_store_table_impl!(PartitionMetaStoreTable, Partition, PartitionRocksTable);
 meta_store_table_impl!(TableMetaStoreTable, Table, TableRocksTable);
 meta_store_table_impl!(CacheItemMetaStoreTable, CacheItem, CacheItemRocksTable);
+meta_store_table_impl!(QueueItemMetaStoreTable, QueueItem, QueueItemRocksTable);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PartitionData {
@@ -1198,12 +1254,31 @@ pub trait MetaStore: DIService + Send + Sync {
 
     async fn debug_dump(&self, out_path: String) -> Result<(), CubeError>;
 
+    // cache
     async fn all_cache(&self) -> Result<Vec<IdRow<CacheItem>>, CubeError>;
     async fn cache_set(&self, item: CacheItem, nx: bool) -> Result<bool, CubeError>;
     async fn cache_truncate(&self) -> Result<(), CubeError>;
     async fn cache_delete(&self, key: String) -> Result<(), CubeError>;
     async fn cache_get(&self, key: String) -> Result<Option<IdRow<CacheItem>>, CubeError>;
+    async fn cache_incr(&self, key: String) -> Result<IdRow<CacheItem>, CubeError>;
     async fn cache_keys(&self, prefix: String) -> Result<Vec<IdRow<CacheItem>>, CubeError>;
+
+    // queue
+    async fn all_queue(&self) -> Result<Vec<IdRow<QueueItem>>, CubeError>;
+    async fn queue_add(&self, item: QueueItem) -> Result<bool, CubeError>;
+    async fn queue_truncate(&self) -> Result<(), CubeError>;
+    async fn queue_get(&self, key: String) -> Result<Option<IdRow<QueueItem>>, CubeError>;
+    async fn queue_list(&self, prefix: String) -> Result<Vec<IdRow<QueueItem>>, CubeError>;
+    async fn queue_cancel(&self, key: String) -> Result<Option<IdRow<QueueItem>>, CubeError>;
+    async fn queue_heartbeat(&self, key: String) -> Result<(), CubeError>;
+    async fn queue_retrieve(&self, key: String) -> Result<Option<IdRow<QueueItem>>, CubeError>;
+    async fn queue_ack(&self, key: String, result: String) -> Result<(), CubeError>;
+    async fn queue_result(
+        &self,
+        key: String,
+        timeout: u64,
+    ) -> Result<Option<AckQueueItem>, CubeError>;
+    async fn queue_merge_extra(&self, key: String, payload: String) -> Result<(), CubeError>;
 
     // Force compaction for specific column family
     async fn cf_compaction(&self, cf: ColumnFamilyName) -> Result<(), CubeError>;
@@ -1213,6 +1288,13 @@ pub trait MetaStore: DIService + Send + Sync {
 
 crate::di_service!(RocksMetaStore, [MetaStore]);
 crate::di_service!(MetaStoreRpcClient, [MetaStore]);
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AckQueueItem {
+    row_id: u64,
+    path: String,
+    pub result: String,
+}
 
 #[derive(Clone, Debug)]
 pub enum MetaStoreEvent {
@@ -1246,6 +1328,10 @@ pub enum MetaStoreEvent {
 
     UpdateCacheItem(IdRow<CacheItem>, IdRow<CacheItem>),
     DeleteCacheItem(IdRow<CacheItem>),
+
+    UpdateQueueItem(IdRow<QueueItem>, IdRow<QueueItem>),
+    DeleteQueueItem(IdRow<QueueItem>),
+    AckQueueItem(AckQueueItem),
 }
 
 type SecondaryKey = Vec<u8>;
@@ -1404,24 +1490,17 @@ enum_from_primitive! {
         Sources = 0x0800,
         MultiIndexes = 0x0900,
         MultiPartitions = 0x0A00,
-        CacheItems = 0x0B00
+        CacheItems = 0x0B00,
+        QueueItems = 0x0C00
     }
 }
 
 impl TableId {
     pub fn has_ttl(&self) -> bool {
         match self {
-            TableId::Schemas => false,
-            TableId::Tables => false,
-            TableId::Indexes => false,
-            TableId::Partitions => false,
-            TableId::Chunks => false,
-            TableId::WALs => false,
-            TableId::Jobs => false,
-            TableId::Sources => false,
-            TableId::MultiIndexes => false,
-            TableId::MultiPartitions => false,
             TableId::CacheItems => true,
+            TableId::QueueItems => true,
+            _ => false,
         }
     }
 }
@@ -1438,6 +1517,7 @@ fn migrate_all_tables<'a>(table_ref: DbTableRef<'a>) -> Result<(), CubeError> {
     MultiIndexRocksTable::new(table_ref.clone()).migration()?;
     MultiPartitionRocksTable::new(table_ref.clone()).migration()?;
     CacheItemRocksTable::new(table_ref.clone()).migration()?;
+    QueueItemRocksTable::new(table_ref.clone()).migration()?;
     Ok(())
 }
 
@@ -1469,6 +1549,7 @@ fn get_compaction_state() -> CompactionPreloadedState {
     populate_indexes!(MultiIndexRocksTable);
     populate_indexes!(MultiPartitionRocksTable);
     populate_indexes!(CacheItemRocksTable);
+    populate_indexes!(QueueItemRocksTable);
 
     CompactionPreloadedState::new(indexes)
 }
@@ -2198,8 +2279,28 @@ trait RocksTable: Debug + Send + Sync {
 
     fn delete(&self, row_id: u64, batch_pipe: &mut BatchPipe) -> Result<IdRow<Self::T>, CubeError> {
         let row = self.get_row_or_not_found(row_id)?;
-        let deleted_row = self.delete_row_indexes(row.get_row(), row_id)?;
-        batch_pipe.add_event(MetaStoreEvent::Delete(Self::table_id(), row_id));
+        self.delete_impl(row, batch_pipe)
+    }
+
+    fn try_delete(
+        &self,
+        row_id: u64,
+        batch_pipe: &mut BatchPipe,
+    ) -> Result<Option<IdRow<Self::T>>, CubeError> {
+        if let Some(row) = self.get_row(row_id)? {
+            Ok(Some(self.delete_impl(row, batch_pipe)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn delete_impl(
+        &self,
+        row: IdRow<Self::T>,
+        batch_pipe: &mut BatchPipe,
+    ) -> Result<IdRow<Self::T>, CubeError> {
+        let deleted_row = self.delete_row_indexes(row.get_row(), row.get_id())?;
+        batch_pipe.add_event(MetaStoreEvent::Delete(Self::table_id(), row.get_id()));
         batch_pipe.add_event(self.delete_event(row.clone()));
         for row in deleted_row {
             batch_pipe.batch().delete_cf(self.cf()?, row.key);
@@ -2207,7 +2308,7 @@ trait RocksTable: Debug + Send + Sync {
 
         batch_pipe
             .batch()
-            .delete_cf(self.cf()?, self.delete_row(row_id)?.key);
+            .delete_cf(self.cf()?, self.delete_row(row.get_id())?.key);
 
         Ok(row)
     }
@@ -2652,6 +2753,30 @@ impl std::fmt::Display for ColumnFamilyName {
     }
 }
 
+pub struct RocksMetaStoreListener {
+    receiver: Receiver<MetaStoreEvent>,
+}
+
+impl RocksMetaStoreListener {
+    pub async fn wait_for_queue_ack(
+        mut self,
+        key: String,
+    ) -> Result<Option<AckQueueItem>, CubeError> {
+        // QuueueItem->result
+        // 1. get result
+        // 2. receive result
+
+        loop {
+            let event = self.receiver.recv().await?;
+            if let MetaStoreEvent::AckQueueItem(payload) = &event {
+                if payload.path == key {
+                    return Ok(Some(payload.clone()));
+                }
+            }
+        }
+    }
+}
+
 impl RocksMetaStore {
     pub fn with_listener(
         path: impl AsRef<Path>,
@@ -2833,7 +2958,22 @@ impl RocksMetaStore {
     }
 
     pub async fn add_listener(&self, listener: Sender<MetaStoreEvent>) {
-        self.listeners.write().await.push(listener);
+        let mut listeners = self.listeners.write().await;
+        listeners.push(listener)
+    }
+
+    pub async fn get_metastore_listener(&self) -> RocksMetaStoreListener {
+        let listeners = self.listeners.read().await;
+
+        let sender = if listeners.len() > 0 {
+            listeners.first().unwrap()
+        } else {
+            panic!("kek");
+        };
+
+        RocksMetaStoreListener {
+            receiver: sender.subscribe(),
+        }
     }
 
     async fn write_operation<F, R>(&self, f: F) -> Result<R, CubeError>
@@ -4112,6 +4252,221 @@ impl MetaStore for RocksMetaStore {
         Ok(())
     }
 
+    async fn all_queue(&self) -> Result<Vec<IdRow<QueueItem>>, CubeError> {
+        self.read_operation_cache(move |db_ref| Ok(QueueItemRocksTable::new(db_ref).all_rows()?))
+            .await
+    }
+
+    async fn queue_add(&self, item: QueueItem) -> Result<bool, CubeError> {
+        self.write_operation_cache(move |db_ref, batch_pipe| {
+            let queue_schema = QueueItemRocksTable::new(db_ref.clone());
+            let index_key = QueueItemIndexKey::ByPath(item.get_path());
+            let id_row_opt = queue_schema
+                .get_single_opt_row_by_index(&index_key, &QueueItemRocksIndex::ByPath)?;
+
+            if id_row_opt.is_none() {
+                queue_schema.insert(item, batch_pipe)?;
+            }
+
+            Ok(true)
+        })
+        .await
+    }
+
+    async fn queue_truncate(&self) -> Result<(), CubeError> {
+        self.write_operation_cache(move |db_ref, batch_pipe| {
+            let queue_schema = QueueItemRocksTable::new(db_ref);
+            let rows = queue_schema.all_rows()?;
+            for row in rows.iter() {
+                queue_schema.delete(row.get_id(), batch_pipe)?;
+            }
+
+            Ok(())
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    async fn queue_get(&self, key: String) -> Result<Option<IdRow<QueueItem>>, CubeError> {
+        self.read_operation_cache(move |db_ref| {
+            let queue_schema = QueueItemRocksTable::new(db_ref.clone());
+            let index_key = QueueItemIndexKey::ByPath(key);
+            queue_schema.get_single_opt_row_by_index(&index_key, &QueueItemRocksIndex::ByPath)
+        })
+        .await
+    }
+
+    async fn queue_list(&self, prefix: String) -> Result<Vec<IdRow<QueueItem>>, CubeError> {
+        self.read_operation_cache(move |db_ref| {
+            let queue_schema = QueueItemRocksTable::new(db_ref.clone());
+            let index_key = QueueItemIndexKey::ByPrefix(prefix);
+            queue_schema.get_rows_by_index(&index_key, &QueueItemRocksIndex::ByPrefix)
+        })
+        .await
+    }
+
+    async fn queue_cancel(&self, key: String) -> Result<Option<IdRow<QueueItem>>, CubeError> {
+        self.write_operation_cache(move |db_ref, batch_pipe| {
+            let queue_schema = QueueItemRocksTable::new(db_ref.clone());
+            let index_key = QueueItemIndexKey::ByPath(key);
+            let id_row_opt = queue_schema
+                .get_single_opt_row_by_index(&index_key, &QueueItemRocksIndex::ByPath)?;
+
+            if let Some(id_row) = id_row_opt {
+                Ok(Some(queue_schema.delete(id_row.get_id(), batch_pipe)?))
+            } else {
+                Ok(None)
+            }
+        })
+        .await
+    }
+
+    async fn queue_retrieve(&self, key: String) -> Result<Option<IdRow<QueueItem>>, CubeError> {
+        self.write_operation_cache(move |db_ref, batch_pipe| {
+            let queue_schema = QueueItemRocksTable::new(db_ref.clone());
+            let index_key = QueueItemIndexKey::ByPath(key.clone());
+            let id_row_opt = queue_schema
+                .get_single_opt_row_by_index(&index_key, &QueueItemRocksIndex::ByPath)?;
+
+            if let Some(id_row) = id_row_opt {
+                if id_row.get_row().get_status() == &QueueItemStatus::Pending {
+                    let new = queue_schema.update_with_fn(
+                        id_row.id,
+                        |item| {
+                            let mut new = item.clone();
+                            new.status = QueueItemStatus::Active;
+
+                            new
+                        },
+                        batch_pipe,
+                    )?;
+
+                    Ok(Some(new))
+                } else {
+                    Ok(None)
+                }
+            } else {
+                Ok(None)
+            }
+        })
+        .await
+    }
+
+    async fn queue_ack(&self, key: String, result: String) -> Result<(), CubeError> {
+        self.write_operation_cache(move |db_ref, batch_pipe| {
+            let queue_schema = QueueItemRocksTable::new(db_ref.clone());
+            let index_key = QueueItemIndexKey::ByPath(key.clone());
+            let id_row_opt = queue_schema
+                .get_single_opt_row_by_index(&index_key, &QueueItemRocksIndex::ByPath)?;
+
+            if let Some(id_row) = id_row_opt {
+                queue_schema.update_with_fn(
+                    id_row.id,
+                    |item| {
+                        let mut new = item.clone();
+                        new.status = QueueItemStatus::Finished;
+
+                        new
+                    },
+                    batch_pipe,
+                )?;
+                batch_pipe.add_event(MetaStoreEvent::AckQueueItem(AckQueueItem {
+                    row_id: id_row.id,
+                    path: id_row.get_row().get_path(),
+                    result,
+                }));
+
+                Ok(())
+            } else {
+                Err(CubeError::user(format!(
+                    "Unable ack queue, unknown id: {}",
+                    key
+                )))
+            }
+        })
+        .await
+    }
+
+    async fn queue_result(
+        &self,
+        key: String,
+        timeout: u64,
+    ) -> Result<Option<AckQueueItem>, CubeError> {
+        let listener = self.get_metastore_listener().await;
+        let fut = tokio::time::timeout(
+            Duration::from_millis(timeout),
+            listener.wait_for_queue_ack(key),
+        );
+
+        if let Ok(res) = fut.await {
+            match res {
+                Ok(Some(ack_result)) => {
+                    self.write_operation_cache(move |db_ref, batch_pipe| {
+                        let queue_schema = QueueItemRocksTable::new(db_ref.clone());
+                        queue_schema.try_delete(ack_result.row_id, batch_pipe)?;
+
+                        Ok(Some(ack_result))
+                    })
+                    .await
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(e),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn queue_merge_extra(&self, key: String, payload: String) -> Result<(), CubeError> {
+        self.write_operation_cache(move |db_ref, batch_pipe| {
+            let queue_schema = QueueItemRocksTable::new(db_ref.clone());
+            let index_key = QueueItemIndexKey::ByPath(key.clone());
+            let id_row_opt = queue_schema
+                .get_single_opt_row_by_index(&index_key, &QueueItemRocksIndex::ByPath)?;
+
+            if let Some(id_row) = id_row_opt {
+                let new = id_row.get_row().merge_extra(payload)?;
+
+                queue_schema.update(id_row.id, new, id_row.get_row(), batch_pipe)?;
+
+                Ok(())
+            } else {
+                // Err(CubeError::user(format!(
+                //     "Unable to find queue with id: {}",
+                //     key
+                // )))
+                Ok(())
+            }
+        })
+        .await
+    }
+
+    async fn queue_heartbeat(&self, key: String) -> Result<(), CubeError> {
+        self.write_operation_cache(move |db_ref, batch_pipe| {
+            let queue_schema = QueueItemRocksTable::new(db_ref.clone());
+            let index_key = QueueItemIndexKey::ByPath(key.clone());
+            let id_row_opt = queue_schema
+                .get_single_opt_row_by_index(&index_key, &QueueItemRocksIndex::ByPath)?;
+
+            if let Some(id_row) = id_row_opt {
+                queue_schema.update_with_fn(
+                    id_row.id,
+                    |item| item.update_heartbeat(),
+                    batch_pipe,
+                )?;
+                Ok(())
+            } else {
+                // Err(CubeError::user(format!(
+                //     "Unable to find queue with id: {}",
+                //     key
+                // )))
+                Ok(())
+            }
+        })
+        .await
+    }
+
     async fn cf_compaction(&self, cf_name: ColumnFamilyName) -> Result<(), CubeError> {
         self.write_operation(move |db_ref, _batch_pipe| {
             let cf = db_ref
@@ -4153,6 +4508,29 @@ impl MetaStore for RocksMetaStore {
                 .get_single_opt_row_by_index(&index_key, &CacheItemRocksIndex::ByPath)?;
 
             Ok(id_row_opt)
+        })
+        .await
+    }
+
+    async fn cache_incr(&self, path: String) -> Result<IdRow<CacheItem>, CubeError> {
+        self.write_operation_cache(move |db_ref, batch_pipe| {
+            let cache_schema = CacheItemRocksTable::new(db_ref.clone());
+            let index_key = CacheItemIndexKey::ByPath(path.clone());
+            let id_row_opt = cache_schema
+                .get_single_opt_row_by_index(&index_key, &CacheItemRocksIndex::ByPath)?;
+
+            // TODO: Merge operator?
+            if let Some(id_row) = id_row_opt {
+                let mut new = id_row.row.clone();
+
+                let last_val = id_row.row.value.parse::<i64>()?;
+                new.value = (last_val + 1).to_string();
+
+                cache_schema.update(id_row.id, new, &id_row.row, batch_pipe)
+            } else {
+                let item = CacheItem::new(path, None, "1".to_string());
+                cache_schema.insert(item, batch_pipe)
+            }
         })
         .await
     }
