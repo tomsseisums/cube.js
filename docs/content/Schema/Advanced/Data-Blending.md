@@ -22,6 +22,10 @@ For an example omnichannel store which has both online and offline sales, let's
 calculate summary metrics for revenue, customer count, etc. We have
 `RetailOrders` cube for offline sales:
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`RetailOrders`, {
   sql: `SELECT * FROM retail_orders`,
@@ -47,7 +51,36 @@ cube(`RetailOrders`, {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: RetailOrders
+    sql: SELECT * FROM retail_orders
+    measures:
+      - name: customer_count
+        sql: customer_id
+        type: count_distinct
+      - name: revenue
+        sql: amount
+        type: sum
+    dimensions:
+      - name: created_at
+        sql: created_at
+        type: time
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 An `OnlineOrders` cube for online sales:
+
+<SnippetGroup>
+
+<Snippet>
 
 ```javascript
 cube(`OnlineOrders`, {
@@ -73,6 +106,31 @@ cube(`OnlineOrders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: OnlineOrders
+    sql: SELECT * FROM online_orders
+    measures:
+      - name: customer_count
+        sql: user_id
+        type: count_distinct
+      - name: revenue
+        sql: amount
+        type: sum
+    dimensions:
+      - name: created_at
+        sql: created_at
+        type: time
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 Given the above cubes, a data blending cube can be introduced as follows:
 
@@ -143,8 +201,8 @@ some measures (business related) together and see how they correlate.
 
 Provided we have the aforementioned tables `OnlineOrders` and `RetailOrders`
 let's assume that we want to chart those measures together and see how they
-correlate. You can simply pass the queries to the Cube.js client, and it will
-merge the results which will let you easily display it on the chart.
+correlate. You can simply pass the queries to the Cube client, and it will merge
+the results which will let you easily display it on the chart.
 
 ```javascript
 import cubejs from '@cubejs-client/core';

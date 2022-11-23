@@ -38,11 +38,13 @@ Pre-aggregation names should:
 - Start with a lowercase letter
 - Consist of numbers, letters and `_`
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
-
-  ...,
 
   preAggregations: {
     ordersByStatus: {
@@ -52,6 +54,24 @@ cube(`Orders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: orders_by_status
+        dimensions: [CUBE.status]
+        measures: [CUBE.count]
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 Pre-aggregations must include all dimensions, measures, and filters you will
 query with.
@@ -103,6 +123,10 @@ Rollups are selected for querying based on properties found in queries made to
 the Cube.js REST API. A thorough explanation can be found under [Getting Started
 with Pre-Aggregations][ref-caching-preaggs-target].
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
@@ -117,6 +141,24 @@ cube(`Orders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: orders_by_company
+        measures: [CUBE.count]
+        dimensions: [CUBE.status]
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 <h4 id="parameters-type-originalsql">originalSql</h4>
 
@@ -147,6 +189,10 @@ two specific applications:
 
 For example, to pre-aggregate all completed orders, you could do the following:
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`CompletedOrders`, {
   sql: `SELECT * FROM orders WHERE completed = true`,
@@ -160,6 +206,23 @@ cube(`CompletedOrders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: CompletedOrders
+    sql: SELECT * FROM orders WHERE completed = true
+    pre_aggregations:
+      - name: main
+        type: originalSql
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 <h4 id="parameters-type-rollupjoin">rollupJoin</h4>
 
@@ -190,6 +253,10 @@ and an `ordersWithUsersRollup` pre-aggregation. Note the following:
 - The type of `ordersWithUsersRollup` is `rollupJoin`.
 - This pre-aggregation has a special property `rollups` which is an array
   containing references to both "source" rollups.
+
+<SnippetGroup>
+
+<Snippet>
 
 ```javascript
 cube(`Users`, {
@@ -279,11 +346,82 @@ cube('Orders', {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Users
+    dataSource: postgres
+    sql: SELECT * FROM public.users
+    pre_aggregations:
+      - name: users_rollup
+        dimensions:
+          - CUBE.id
+          -CUBE.name
+    measures:
+      - name: count
+        type: count
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: "{CUBE}.first_name || {CUBE}.last_name"
+        type: string
+
+  - name: Orders
+    dataSource: mssql
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: orders_rollup
+        measures: [CUBE.count]
+        dimensions: [CUBE.user_id, CUBE.status]
+        timeDimension: CUBE.created_at
+        granularity: day
+      - name: orders_with_users_rollup
+        type: rollupJoin
+        measures: [CUBE.count]
+        dimensions: [Users.name]
+        rollups: [Users.users_rollup, CUBE.orders_rollup]
+    joins:
+      - name: Users
+        relationship: belongsTo
+        sql: ${CUBE.user_id} = ${Users.id}
+    measures:
+      - name: count
+        type: count
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primaryKey: true
+      - name: user_id
+        sql: user_id
+        type: number
+      - name: status
+        sql: status
+        type: string
+      - name: created_at
+        sql: created_at
+        type: time
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 <InfoBox>
 
 `rollupJoin` is not required to join cubes from the same data source; instead
 include the foreign cube's dimensions/measures in the rollup definition
 directly:
+
+<SnippetGroup>
+
+<Snippet>
 
 ```javascript
 cube('Orders', {
@@ -299,6 +437,26 @@ cube('Orders', {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: orders_rollup
+        measures: [CUBE.count]
+        dimensions: [Users.name, CUBE.status]
+        timeDimension: CUBE.created_at
+        granularity: day
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 </InfoBox>
 
@@ -324,6 +482,10 @@ pre-aggregations across different schema-compatible cubes.
 The `measures` property is an array of [measures from the
 cube][ref-schema-measures] that should be included in the pre-aggregation:
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube('Orders', {
   sql: `SELECT * FROM orders`,
@@ -342,10 +504,34 @@ cube('Orders', {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    measures:
+      - name: count
+        type: count
+    pre_aggregations:
+      - name: users_rollup
+        measures: [CUBE.count]
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 ### <--{"id" : "Parameters"}--> dimensions
 
 The `dimensions` property is an array of [dimensions from the
 cube][ref-schema-dimensions] that should be included in the pre-aggregation:
+
+<SnippetGroup>
+
+<Snippet>
 
 ```javascript
 cube('Orders', {
@@ -366,12 +552,37 @@ cube('Orders', {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    dimensions:
+      - name: status
+        type: string
+        sql: status
+    pre_aggregations:
+      - name: users_rollup
+        dimensions: [CUBE.status]
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 ### <--{"id" : "Parameters"}--> timeDimension
 
 The `timeDimension` property can be any [`dimension`][ref-schema-dimensions] of
 type [`time`][ref-schema-types-dim-time]. All other measures and dimensions in
 the schema are aggregated This property is an extremely useful tool for
 improving performance with massive datasets.
+
+<SnippetGroup>
+
+<Snippet>
 
 ```javascript
 cube('Orders', {
@@ -405,6 +616,36 @@ cube('Orders', {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    measures:
+      - name: count
+        type: count
+    dimensions:
+      - name: status
+        type: string
+        sql: status
+      - name: created_at
+        type: time
+        sql: created_at
+    pre_aggregations:
+      - name: orders_by_status
+        measures: [CUBE.count]
+        dimensions: [CUBE.status]
+        timeDimension: CUBE.created_at
+        granularity: day
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 A [`granularity`][self-granularity] **must** also be included in the
 pre-aggregation definition.
 
@@ -414,11 +655,13 @@ The `granularity` property defines the granularity of data _within_ the
 pre-aggregation. If set to `week`, for example, then Cube.js will pre-aggregate
 the data by week and persist it to Cube Store.
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube('Orders', {
   sql: `SELECT * FROM orders`,
-
-  ...,
 
   preAggregations: {
     usersRollupByWeek: {
@@ -431,6 +674,26 @@ cube('Orders', {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: users_rollup_by_week
+        measures: [CUBE.count]
+        dimensions: [CUBE.status]
+        timeDimension: CUBE.created_at
+        granularity: week
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 The value can be one of `second`, `minute`, `hour`, `day`, `week`, `month`,
 `quarter` or `year`. This property is required when using
 [`timeDimension`][self-timedimension].
@@ -439,6 +702,10 @@ The value can be one of `second`, `minute`, `hour`, `day`, `week`, `month`,
 
 The `segments` property is an array of [segments from the
 cube][ref-schema-segments] that can target the pre-aggregation:
+
+<SnippetGroup>
+
+<Snippet>
 
 ```javascript
 cube(`Orders`, {
@@ -465,16 +732,42 @@ cube(`Orders`, {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    measures:
+      - name: count
+        type: count
+    segments:
+      - name: only_complete
+        sql: "{CUBE}.status = 'completed'"
+    pre_aggregations:
+      - name: main
+        measures: [CUBE.count]
+        segments: [CUBE.only_complete]
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 ### <--{"id" : "Parameters"}--> partitionGranularity
 
 The `partitionGranularity` defines the granularity for each
 [partition][ref-caching-partitioning] of the pre-aggregation:
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube('Orders', {
   sql: `SELECT * FROM orders`,
-
-  ...,
 
   preAggregations: {
     usersRollup: {
@@ -487,6 +780,27 @@ cube('Orders', {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: users_rollup
+        measures: [CUBE.count]
+        dimensions: [CUBE.status]
+        timeDimension: CUBE.created_at
+        granularity: day
+        partitionGranularity: month
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 The value can be one of `hour`, `day`, `week`, `month`, `quarter`, `year`. A
 [`timeDimension`][self-timedimension] and [`granularity`][self-granularity]
@@ -523,6 +837,10 @@ key is evaluated for each partition separately.
 
 You can set up a custom refresh check strategy by using the `sql` property:
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
@@ -538,6 +856,25 @@ cube(`Orders`, {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: main
+        measures: [CUBE.count]
+        refreshKey:
+          sql: "SELECT MAX(created_at) FROM orders"
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 In the above example, the refresh key SQL will be executed every 10 seconds, as
 [`every`][self-refreshkey-every] is not defined. If the results of the SQL
 refresh key differ from the last execution, then the pre-aggregation will be
@@ -549,6 +886,10 @@ The `refreshKey` can define an `every` property which can be used to refresh
 pre-aggregations based on a time interval. By default, it is set to `1 hour`
 unless the [`sql` property][self-refreshkey-sql] is also defined, in which case
 it is set to `10 seconds`. For example:
+
+<SnippetGroup>
+
+<Snippet>
 
 ```javascript
 cube(`Orders`, {
@@ -565,10 +906,33 @@ cube(`Orders`, {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: main
+        measures: [CUBE.count]
+        refresh_key:
+          every: 1 day
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 For possible `every` parameter values please refer to
 [`refreshKey`][ref-cube-refreshkey] documentation.
 
 You can also use `every` with `sql`:
+
+<SnippetGroup>
+
+<Snippet>
 
 ```javascript
 cube(`Orders`, {
@@ -585,6 +949,26 @@ cube(`Orders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: main
+        measures: [CUBE.count]
+        refresh_key:
+          every: 1 hour
+          sql: "SELECT MAX(created_at) FROM orders"
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 In the above example, the refresh key SQL will be executed every hour. If the
 results of the SQL refresh key differ from the last execution, then the
@@ -604,15 +988,17 @@ existing tables.
 
 </WarningBox>
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
 
-  ...,
-
   preAggregations: {
     main: {
-      measure: [CUBE.count],
+      measures: [CUBE.count],
       timeDimension: CUBE.createdAt,
       granularity: `day`,
       partitionGranularity: `day`,
@@ -624,6 +1010,29 @@ cube(`Orders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: main
+        measures: [CUBE.count]
+        time_dimension: CUBE.created_at
+        granularity: day
+        partition_granularity: day
+        refresh_key:
+          every: 1 day
+          incremental: true
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 <h4 id="parameters-refresh-key-updatewindow">updateWindow</h4>
 
@@ -649,15 +1058,17 @@ In the example below, it will refresh today's and the last 7 days of partitions
 once a day. Partitions before the `7 day` interval **will not** be refreshed
 once they are built unless the rollup SQL is changed.
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
 
-  ...,
-
   preAggregations: {
     main: {
-      measure: [CUBE.count],
+      measures: [CUBE.count],
       timeDimension: CUBE.createdAt,
       granularity: `day`,
       partitionGranularity: `day`,
@@ -671,6 +1082,30 @@ cube(`Orders`, {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: main
+        measures: [CUBE.count]
+        time_dimension: CUBE.created_at
+        granularity: day
+        partition_granularity: day
+        refresh_key:
+          every: 1 day
+          incremental: true
+          update_window: 7 day
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 This property is required when using [`incremental`][self-incremental]
 refreshes.
 
@@ -681,11 +1116,13 @@ match this pre-aggregation when using non-strict date ranges. This is useful
 when using a visualization tools such as [Apache
 Superset][ref-config-downstream-superset] that use loose date ranges by default.
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
-
-  ...,
 
   preAggregations: {
     main: {
@@ -698,6 +1135,27 @@ cube(`Orders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: main
+        measure: [CUBE.count]
+        time_dimension: CUBE.created_at
+        granularity: day
+        partition_granularity: day
+        allowNonStrictDateRangeMatch: true
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 ### <--{"id" : "Parameters"}--> useOriginalSqlPreAggregations
 
@@ -717,6 +1175,10 @@ be set on their respective database driver.
 
 </WarningBox>
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `
@@ -726,8 +1188,6 @@ cube(`Orders`, {
     UNION ALL
     SELECT * FROM orders3
     `,
-
-  ...,
 
   preAggregations: {
     main: {
@@ -747,6 +1207,37 @@ cube(`Orders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: >
+      SELECT * FROM orders1
+      UNION ALL
+      SELECT * FROM orders2
+      UNION ALL
+      SELECT * FROM orders3
+    pre_aggregations:
+      - name: main
+        type: originalSql
+      - name: statuses
+        measures: [CUBE.count]
+        dimensions: [CUBE.status]
+        useOriginalSqlPreAggregations: true
+      - name: completedOrders
+        measures: [CUBE.count]
+        time_dimension: CUBE.completed_at
+        granularity: day
+        useOriginalSqlPreAggregations: true
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 ### <--{"id" : "Parameters"}--> scheduledRefresh
 
@@ -770,11 +1261,13 @@ refresh all pre-aggregations which have `scheduledRefresh: true`.
 Please consult [Production Checklist][ref-production-checklist-refresh] for best
 practices on running background refresh in production environments.
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
-
-  // ...
 
   preAggregations: {
     ordersByStatus: {
@@ -787,6 +1280,27 @@ cube(`Orders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: orders_by_status
+        measures: [CUBE.count]
+        dimensions: [CUBE.status]
+        time_dimension: CUBE.created_at
+        granularity: day
+        partition_granularity: month
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 ### <--{"id" : "Parameters"}--> buildRangeStart and buildRangeEnd
 
@@ -803,11 +1317,13 @@ pre-aggregation.
 
 </InfoBox>
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
-
-  ...,
 
   preAggregations: {
     main: {
@@ -825,6 +1341,29 @@ cube(`Orders`, {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: main
+        measures: [CUBE.count]
+        time_dimension: CUBE.created_at
+        granularity: day
+        build_range_start:
+          sql: SELECT NOW() - interval '300 day'
+        build_range_end:
+          sql: SELECT NOW()
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 It can be used together with the pre-aggregation's `refreshKey` to define
 granular update settings. Set `refreshKey.updateWindow` to the interval in which
 your data can change and `buildRangeStart` to the earliest point of time when
@@ -835,11 +1374,13 @@ In the following example, `refreshKey.updateWindow` is `1 week` and
 refresh will build historical partitions for 365 days in the past and will only
 refresh last week's data.
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
-
-  ...,
 
   preAggregations: {
     main: {
@@ -861,6 +1402,32 @@ cube(`Orders`, {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: main
+        measures: [CUBE.count]
+        time_dimension: CUBE.created_at
+        granularity: day
+        partition_granularity: month
+        build_range_start:
+          sql: SELECT NOW() - interval '365 day'
+        build_range_end:
+          sql: SELECT NOW()
+        refresh_key:
+          update_window: 1 week
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 ### <--{"id" : "Parameters"}--> unionWithSourceData
 
 This option allows combining a pre-aggregation with fresh data retrieved from
@@ -870,13 +1437,14 @@ sacrificed for accuracy.
 To configure a pre-aggregation to behave in this way, ensure the pre-aggregation
 is of type `rollupLambda`, and then set `unionWithSourceData` to `true`:
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
-  ...,
 
   preAggregations: {
-    ...,
-
     lambda: {
       type: `rollupLambda`,
       unionWithSourceData: true,
@@ -886,17 +1454,37 @@ cube(`Orders`, {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    pre_aggregations:
+      - name: lambda
+        type: rollupLambda
+        unionWithSourceData: true
+        rollups: [Orders.main]
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 ### <--{"id" : "Parameters"}--> indexes
 
 In case of pre-aggregation tables having significant cardinality, you might want
 to create indexes for them in databases which support it. This can be done as
 follows:
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
-
-  ...,
 
   preAggregations: {
     categoryAndDate: {
@@ -914,6 +1502,29 @@ cube(`Orders`, {
 });
 ```
 
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: category_and_date
+        measures: [CUBE.count]
+        dimensions: [CUBE.category]
+        time_dimension: CUBE.created_at
+        granularity: day
+        indexes:
+          - name: category_index
+            columns: [CUBE.category]
+```
+
+</Snippet>
+
+</SnippetGroup>
+
 To maximize performance, you can introduce an index per query, so the set of
 dimensions used in the query is the same as in the index. There's no need to
 define measure columns in the index. The index column order is the sort order of
@@ -928,11 +1539,13 @@ consider putting these columns after `GROUP BY` dimensions.
 For `originalSql` pre-aggregations, the original column names as strings can be
 used:
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
   sql: `SELECT * FROM orders`,
-
-  ...,
 
   preAggregations: {
     main: {
@@ -946,6 +1559,26 @@ cube(`Orders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: main
+        type: originalSql
+        indexes:
+          - name: timestamp_index
+            columns: [timestamp]
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 ### <--{"id" : "Parameters"}--> Aggregating indexes
 
@@ -970,9 +1603,12 @@ less cost from a data warehouse perspective.
 Aggregating indexes can be defined by adding a `type: 'aggregate'` to the index
 definition:
 
+<SnippetGroup>
+
+<Snippet>
+
 ```javascript
 cube(`Orders`, {
-  ...,
 
   preAggregations: {
     categoryAndDate: {
@@ -993,6 +1629,32 @@ cube(`Orders`, {
   },
 });
 ```
+
+</Snippet>
+
+<Snippet>
+
+```yaml
+cubes:
+  - name: Orders
+    sql: SELECT * FROM orders
+    pre_aggregations:
+      - name: category_and_date
+        measures: [CUBE.count]
+        dimensions: [CUBE.status]
+        time_dimension: CUBE.created_at
+        granularity: day
+        indexes:
+          - name: category_index
+            columns: [CUBE.status, Products.name]
+          - name: aggregated_index
+            columns: [CUBE.status]
+            type: aggregate
+```
+
+</Snippet>
+
+</SnippetGroup>
 
 [ref-api-ref-query-ref]: https://cube.dev/docs/query-format#query-properties
 [ref-caching-lambda-preaggs]: /caching/pre-aggregations/lambda-pre-aggregations
