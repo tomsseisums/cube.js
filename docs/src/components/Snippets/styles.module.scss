@@ -1,4 +1,8 @@
 .snippetGroup {
   display: flex;
   gap: 1rem;
+
+  > pre[class^='language'], div[class*=' language']{
+    margin-top: 0;
+  }
 }
