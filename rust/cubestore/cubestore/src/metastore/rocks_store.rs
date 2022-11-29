@@ -27,6 +27,7 @@ use tokio::fs;
 use tokio::fs::File;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{oneshot, Notify, RwLock};
+use tracing::Instrument;
 
 macro_rules! enum_from_primitive_impl {
     ($name:ident, $( $variant:ident )*) => {
@@ -715,6 +716,7 @@ impl RocksStore {
                 log::error!("[{}] Error during read write loop send: {}", store_name, e);
             }
         })
+        .instrument(tracing::trace_span!("spawn_blocking"))
         .await?;
         let (spawn_res, events) = rx.await??;
 
@@ -889,6 +891,7 @@ impl RocksStore {
                 log::error!("Error during read write loop send: {}", e);
             }
         })
+        .instrument(tracing::trace_span!("spawn_blocking"))
         .await?;
 
         rx.await?
@@ -923,6 +926,7 @@ impl RocksStore {
 
             res
         })
+        .instrument(tracing::trace_span!("spawn_blocking"))
         .await?
     }
 
