@@ -771,6 +771,10 @@ pub trait MetaStore: DIService + Send + Sync {
     fn partition_table(&self) -> PartitionMetaStoreTable;
     async fn create_partition(&self, partition: Partition) -> Result<IdRow<Partition>, CubeError>;
     async fn get_partition(&self, partition_id: u64) -> Result<IdRow<Partition>, CubeError>;
+    async fn get_partition_and_index_for_chunks_out_of_queue(
+        &self,
+        chunks: Vec<IdRow<Chunk>>,
+    ) -> Result<Vec<(IdRow<Chunk>, IdRow<Partition>, IdRow<Index>)>, CubeError>;
     async fn get_partition_for_compaction(
         &self,
         partition_id: u64,
@@ -2175,6 +2179,43 @@ impl MetaStore for RocksMetaStore {
         .await
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
+    async fn get_partition_and_index_for_chunks_out_of_queue(
+        &self,
+        chunks: Vec<IdRow<Chunk>>,
+    ) -> Result<Vec<(IdRow<Chunk>, IdRow<Partition>, IdRow<Index>)>, CubeError> {
+        self.read_operation_out_of_queue(move |db| {
+            let partition_db = PartitionRocksTable::new(db.clone());
+            let index_db = IndexRocksTable::new(db.clone());
+            let mut res = Vec::with_capacity(chunks.len());
+            for chunk in chunks.into_iter() {
+                let chunk_id = chunk.get_id();
+                let partition_id = chunk.get_row().get_partition_id();
+
+                let partition = partition_db
+                    .get_row(partition_id)?
+                    .ok_or(CubeError::internal(format!(
+                        "Partition {} is not found for chunk {}",
+                        partition_id, chunk_id
+                    )))?;
+
+                let index_id = partition.get_row().get_index_id();
+
+                let index = index_db
+                    .get_row(index_id)?
+                    .ok_or(CubeError::internal(format!(
+                        "Index {} is not found for partition {}",
+                        index_id, partition_id
+                    )))?;
+
+                res.push((chunk, partition, index));
+            }
+            Ok(res)
+        })
+        .await
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
     async fn get_partition_for_compaction(
         &self,
         partition_id: u64,
