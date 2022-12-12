@@ -521,7 +521,8 @@ describe('API Gateway', () => {
           }
         },
         successResult: { preAggregationPartitions: preAggregationPartitionsResultFactory() }
-      }
+      },
+      { route: 'data-sources', successResult: { dataSources: ['default'] } },
     ];
 
     testConfigs.forEach((config) => {
