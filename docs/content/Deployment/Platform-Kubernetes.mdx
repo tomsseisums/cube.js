@@ -7,16 +7,16 @@ subCategory: Platforms
 menuOrder: 3
 ---
 
-This guide walks you through deploying Cube.js with [Kubernetes][k8s]. This
+This guide walks you through deploying Cube with [Kubernetes][k8s]. This
 particular deployment makes use of a `hostPath` volume to mount schema files
 into the containers.
 
 <WarningBox>
 
-This is an example of a deployment, but real-world production deployments
-can vary significantly depending on desired performance and scale. For an
-example of deploying with [Helm][helm-k8s] or plain [Kubernetes][k8s], check out
-the respective examples [here][gh-cubejs-examples-k8s-helm] and
+This is an example of a deployment, but real-world production deployments can
+vary significantly depending on desired performance and scale. For an example of
+deploying with [Helm][helm-k8s] or plain [Kubernetes][k8s], check out the
+respective examples [here][gh-cubejs-examples-k8s-helm] and
 [here][gh-cube-examples-k8s].
 
 </WarningBox>
@@ -27,9 +27,9 @@ the respective examples [here][gh-cubejs-examples-k8s-helm] and
 
 ## Configuration
 
-### <--{"id" : "Configuration"}--> Create Cube.js API instance and Refresh Worker
+### <--{"id" : "Configuration"}--> Create Cube API instance and Refresh Worker
 
-To deploy Cube.js, we will use [`Deployment`][k8s-docs-deployment]s and
+To deploy Cube, we will use [`Deployment`][k8s-docs-deployment]s and
 [Service][k8s-docs-service]s. We'll start by creating a Redis deployment in a
 file called `redis-deployment.yaml`:
 
@@ -66,7 +66,7 @@ We'll also create a corresponding service for this deployment in a file called
   lang="yaml"
 />
 
-Now that we've configured our Cube.js API, let's also set up a deployment for a
+Now that we've configured our Cube API, let's also set up a deployment for a
 Refresh Worker in `cube-refresh-worker-deployment.yaml`:
 
 <GitHubCodeBlock
@@ -78,15 +78,16 @@ Refresh Worker in `cube-refresh-worker-deployment.yaml`:
 
 <WarningBox>
 
-This example uses `CUBESTORE_REMOTE_DIR` and requires `ReadWriteMany` PVCs.
-It also requires a strong read-after-write guarantee from underlying persistent volume.
-This is the simplest Kubernetes setup however, it isn't optimal for production use.
-For best performance and reliability, please use distributed file systems like S3, GCS, Azure Blog Storage, etc.
-Please see [running in production docs][ref-running-in-production-storage] for additional information.
+This example uses `CUBESTORE_REMOTE_DIR` and requires `ReadWriteMany` PVCs. It
+also requires a strong read-after-write guarantee from underlying persistent
+volume. This is the simplest Kubernetes setup however, it isn't optimal for
+production use. For best performance and reliability, please use distributed
+file systems like S3, GCS, Azure Blog Storage, etc. Please see [running in
+production docs][ref-running-in-production-storage] for additional information.
 
 </WarningBox>
 
-With our Cube.js API and Refresh Worker set up, we can now begin setting up Cube
+With our Cube API and Refresh Worker set up, we can now begin setting up Cube
 Store. We will make two [`StatefulSet`][k8s-docs-statefulset]s with
 corresponding [Service][k8s-docs-service]s; one for the router node and one for
 the worker nodes.
@@ -126,7 +127,7 @@ better solution.
 
 ## Set up reverse proxy
 
-In production, the Cube.js API should be served over an HTTPS connection to
+In production, the Cube API should be served over an HTTPS connection to
 ensure security of the data in-transit. We recommend using a reverse proxy; as
 an example, let's assume we're running the Kubernetes cluster on a cloud
 provider such as AWS or GCP. We'll also assume we already have the SSL
@@ -164,9 +165,9 @@ Ingress Controller here][gh-cubejs-examples-k8s-ingress-ctrl].
 
 ### <--{"id" : "Security"}--> Use JSON Web Tokens
 
-Cube.js can be configured to use industry-standard JSON Web Key Sets for
+Cube can be configured to use industry-standard JSON Web Key Sets for
 securing its API and limiting access to data. To do this, we'll define the
-relevant options on our Cube.js API instance and Refresh Worker deployments:
+relevant options on our Cube API instance and Refresh Worker deployments:
 
 <WarningBox>
 
@@ -203,14 +204,14 @@ spec:
 ### <--{"id" : "Security"}--> Securing Cube Store
 
 All Cube Store nodes, both router and workers, should only be accessible to
-Cube.js API instances and refresh workers. To do this with Kubernetes, we need
+Cube API instances and refresh workers. To do this with Kubernetes, we need
 to make sure that none of the Cube Store services are exposed in our Ingress
 configuration. The Cube Store services should only be accessible from other
 services within the cluster.
 
 ## Monitoring
 
-All Cube.js logs can be found through the Kubernetes CLI:
+All Cube logs can be found through the Kubernetes CLI:
 
 ```bash
 kubectl logs
