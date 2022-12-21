@@ -502,6 +502,31 @@ describe('API Gateway', () => {
       expect(res.body).toMatchObject(successResult);
     };
 
+    const wrongPayloadsTestFactory = ({ route, wrongPayloads }: {
+      route: string,
+      method: string,
+      wrongPayloads: {
+        result: {
+          status: number,
+          error: string
+        },
+        body: {}
+      }[]
+    }) => async () => {
+      const { app, token } = appPrepareFactory();
+
+      for (const payload of wrongPayloads) {
+        const req = request(app).post(`/cubejs-system/v1/${route}`)
+          .set('Content-type', 'application/json')
+          .set('Authorization', `Bearer ${token}`)
+          .expect(payload.result.status);
+
+        req.send(payload.body);
+        const res = await req;
+        expect(res.body.error).toBe(payload.result.error);
+      }
+    };
+
     const testConfigs = [
       { route: 'context', successResult: { basePath: 'awesomepathtotest' } },
       { route: 'pre-aggregations', successResult: { preAggregations: preAggregationsResultFactory() } },
@@ -521,7 +546,77 @@ describe('API Gateway', () => {
           }
         },
         successResult: { preAggregationPartitions: preAggregationPartitionsResultFactory() }
-      }
+      },
+      {
+        route: 'db-schema',
+        method: 'post',
+        successBody: {
+          query: {
+            dataSource: 'default',
+            limit: 1,
+            offset: 1,
+          }
+        },
+        successResult: {
+          schemas: ['other'],
+        },
+        wrongPayloads: [
+          {
+            result: {
+              status: 400,
+              error: 'A user\'s query must contain a body'
+            },
+            body: {}
+          },
+          {
+            result: {
+              status: 400,
+              error: 'A user\'s query must contain dataSource.'
+            },
+            body: { query: {} }
+          },
+          {
+            result: {
+              status: 400,
+              error: 'schemaName query param is wrong.'
+            },
+            body: {
+              query: {
+                dataSource: 'default',
+                schemaName: 'wrongSchemaName',
+              }
+            }
+          }
+        ]
+      },
+      {
+        route: 'db-schema',
+        method: 'post',
+        successBody: {
+          query: {
+            dataSource: 'default',
+            schemaName: 'public',
+            limit: 1,
+            offset: 1,
+          }
+        },
+        successResult: {
+          tables: {
+            line_items_count_by_states: [
+              {
+                name: 'users_state',
+                type: 'character varying',
+                attributes: [],
+              },
+              {
+                name: 'line_items_count',
+                type: 'bigint',
+                attributes: [],
+              },
+            ]
+          },
+        },
+      },
     ];
 
     testConfigs.forEach((config) => {
@@ -530,6 +625,9 @@ describe('API Gateway', () => {
         test('not allowed with user token', notAllowedWithUserTokenTestFactory(config));
         test('not route (works only with playgroundAuthSecret)', notExistsTestFactory(config));
         test('success', successTestFactory(config));
+        if (config.method === 'post' && config.wrongPayloads?.length) {
+          test('wrong params', wrongPayloadsTestFactory(config));
+        }
       });
     });
   });

@@ -351,6 +351,14 @@ class ApiGateway {
         systemMiddlewares,
         this.preAggregationsJobs.bind(this),
       );
+
+      app.post('/cubejs-system/v1/db-schema', jsonParser, systemMiddlewares, (async (req: Request, res: Response) => {
+        await this.dbSchema({
+          query: req.body.query,
+          context: req.context,
+          res: this.resToResultFn(res),
+        });
+      }));
     }
 
     app.get('/readyz', guestMiddlewares, cachedHandler(this.readiness));
@@ -987,6 +995,60 @@ class ApiGateway {
     } catch (e) {
       this.handleError({
         e, context, res, requestStarted
+      });
+    }
+  }
+
+  protected async dbSchema({ query, context, res }: {
+    query: { dataSource: string; schemaName?: string, limit?: number, offset?: number };
+    context?: RequestContext;
+    res: ResponseResultFn;
+  }) {
+    const requestStarted = new Date();
+    try {
+      if (!query) {
+        throw new UserError(
+          'A user\'s query must contain a body'
+        );
+      }
+
+      if (!query.dataSource) {
+        throw new UserError(
+          'A user\'s query must contain dataSource.'
+        );
+      }
+
+      const orchestratorApi = await this.getAdapterApi(context);
+      const schema = await orchestratorApi.fetchSchema(query.dataSource, context?.securityContext);
+      query.offset = query.offset || 0;
+
+      if (!query.schemaName) {
+        let schemas = Object.keys(schema);
+
+        if (query.limit) {
+          schemas = schemas.slice(query.offset, query.offset + query.limit);
+        }
+
+        res({ schemas });
+      } else {
+        if (!schema[query.schemaName]) {
+          throw new UserError('schemaName query param is wrong.');
+        }
+
+        let tables = schema[query.schemaName];
+        if (query.limit) {
+          tables = R.fromPairs(
+            R.toPairs(tables).slice(query.offset, query.offset + query.limit)
+          );
+        }
+
+        res({ tables });
+      }
+    } catch (e) {
+      this.handleError({ e,
+        context,
+        res,
+        requestStarted,
       });
     }
   }
