@@ -1000,7 +1000,14 @@ class ApiGateway {
   }
 
   protected async dbSchema({ query, context, res }: {
-    query: { dataSource: string; schemaName?: string, limit?: number, offset?: number };
+    query: {
+      dataSource: string;
+      levelChain?: string[],
+      search?: string,
+      limit?: number,
+      offset?: number,
+      renew?: boolean,
+    };
     context?: RequestContext;
     res: ResponseResultFn;
   }) {
@@ -1019,31 +1026,17 @@ class ApiGateway {
       }
 
       const orchestratorApi = await this.getAdapterApi(context);
-      const schema = await orchestratorApi.fetchSchema(query.dataSource, context?.securityContext);
-      query.offset = query.offset || 0;
+      const schema = await orchestratorApi.fetchSchema(query.dataSource, context?.securityContext, query.renew);
 
-      if (!query.schemaName) {
-        let schemas = Object.keys(schema);
-
-        if (query.limit) {
-          schemas = schemas.slice(query.offset, query.offset + query.limit);
-        }
-
-        res({ schemas });
-      } else {
-        if (!schema[query.schemaName]) {
-          throw new UserError('schemaName query param is wrong.');
-        }
-
-        let tables = schema[query.schemaName];
-        if (query.limit) {
-          tables = R.fromPairs(
-            R.toPairs(tables).slice(query.offset, query.offset + query.limit)
-          );
-        }
-
-        res({ tables });
-      }
+      res({
+        data: this.getSchemaDataByLevel(
+          schema,
+          query.levelChain,
+          query.limit,
+          query.offset,
+          query.search
+        ),
+      });
     } catch (e) {
       this.handleError({ e,
         context,
@@ -1051,6 +1044,60 @@ class ApiGateway {
         requestStarted,
       });
     }
+  }
+
+  protected getSchemaDataByLevel(
+    data: { [key: string]: any },
+    levelChain?: string[],
+    limit?: number,
+    offset?: number,
+    search?: string
+  ) {
+    const currentData =
+      levelChain?.reduce((obj, key) => {
+        if (!obj[key]) {
+          throw new UserError(`levelChain item: ${key} is empty`);
+        }
+        return obj[key];
+      }, data) || data;
+
+    let result = currentData;
+    if (!Array.isArray(currentData)) {
+      result = Object.keys(currentData);
+    }
+
+    if (search) {
+      if (Array.isArray(currentData)) {
+        result = result.filter((item: { name: string }) => item.name.includes(search));
+      } else {
+        // replacing column array to columnName for unnecessary search text
+        const clear = (d: {}) => {
+          Object.keys(d).forEach((key) => {
+            if (Array.isArray(d?.[key])) {
+              d[key] = d[key].map(
+                (item: { name: string }) => item.name
+              );
+            } else {
+              clear(d[key]);
+            }
+          });
+
+          return d;
+        };
+
+        const clearData = clear(currentData);
+        result = result.filter(
+          (item: string) => item.includes(search) ||
+            JSON.stringify(clearData[item]).includes(search)
+        );
+      }
+    }
+
+    if (limit) {
+      result = result.slice(offset, (offset || 0) + limit);
+    }
+
+    return result;
   }
 
   /**
