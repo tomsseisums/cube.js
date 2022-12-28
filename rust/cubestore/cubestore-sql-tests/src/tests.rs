@@ -6465,6 +6465,7 @@ async fn cache_prefix_keys(service: Box<dyn SqlClient>) {
             Row::new(vec![TableValue::String("locks:key3".to_string())]),
         ]
     );
+}
 async fn limit_pushdown_group(service: Box<dyn SqlClient>) {
     service.exec_query("CREATE SCHEMA foo").await.unwrap();
     service
